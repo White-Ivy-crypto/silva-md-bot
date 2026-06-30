@@ -1,6 +1,7 @@
 require('dotenv').config();
 const { Client, LocalAuth, MessageMedia } = require('whatsapp-web.js');
 const qrcode = require('qrcode-terminal');
+const QRCode = require('qrcode');
 const express = require('express');
 const fs = require('fs');
 const path = require('path');
@@ -24,9 +25,30 @@ const client = new Client({
 
 const app = express();
 
-client.on('qr', (qr) => {
+let latestQrDataUrl = null;
+const QR_IMAGE_PATH = path.join(TMP_DIR, 'qr.png');
+const QR_DATAURL_PATH = path.join(TMP_DIR, 'qr.dataurl');
+
+client.on('qr', async (qr) => {
   console.log('Scan this QR with WhatsApp mobile:');
   qrcode.generate(qr, { small: true });
+
+  try {
+    latestQrDataUrl = await QRCode.toDataURL(qr);
+    // save PNG to tmp
+    const base64Data = latestQrDataUrl.replace(/^data:image\/png;base64,/, '');
+    fs.writeFileSync(QR_IMAGE_PATH, Buffer.from(base64Data, 'base64'));
+    // save dataurl as plain text so you can cat it from the server
+    fs.writeFileSync(QR_DATAURL_PATH, latestQrDataUrl);
+
+    console.log('QR saved to', QR_IMAGE_PATH);
+    console.log('QR data URL saved to', QR_DATAURL_PATH);
+    console.log('\n--- QR data URL (you can copy/paste this into your phone browser) ---\n');
+    console.log(latestQrDataUrl);
+    console.log('\n--- End QR data URL ---\n');
+  } catch (e) {
+    console.warn('Failed to generate PNG QR:', e.message);
+  }
 });
 
 client.on('ready', () => {
@@ -64,8 +86,6 @@ async function handleIncomingMessage(message) {
         }
       }
     }
-
-    // Welcome new members: whatsapp-web.js emits 'group_join' and 'group_leave' events handled below
 
     // Command parsing
     const body = (message.body || '').trim();
@@ -304,6 +324,38 @@ client.on('group_join', async (notification) => {
   } catch (e) {
     console.warn('group_join handler failed', e.message);
   }
+});
+
+// QR endpoints
+app.get('/qr', (req, res) => {
+  if (latestQrDataUrl) {
+    return res.send(`<html><head><meta charset="utf-8"><title>Silva QR</title></head><body><h3>Scan with WhatsApp (Linked Devices → Link a device)</h3><img src="${latestQrDataUrl}" alt="QR" /><p>Refresh this page after scanning.</p></body></html>`);
+  }
+  // if file exists, serve it
+  if (fs.existsSync(QR_IMAGE_PATH)) {
+    const img = fs.readFileSync(QR_IMAGE_PATH);
+    res.setHeader('Content-Type', 'image/png');
+    return res.send(img);
+  }
+  res.status(404).send('QR not available yet. Start the bot and wait for the QR to be generated.');
+});
+
+app.get('/qr.png', (req, res) => {
+  if (fs.existsSync(QR_IMAGE_PATH)) {
+    const img = fs.readFileSync(QR_IMAGE_PATH);
+    res.setHeader('Content-Type', 'image/png');
+    return res.send(img);
+  }
+  res.status(404).send('QR not available');
+});
+
+app.get('/qr.dataurl', (req, res) => {
+  if (fs.existsSync(QR_DATAURL_PATH)) {
+    const txt = fs.readFileSync(QR_DATAURL_PATH, 'utf8');
+    res.setHeader('Content-Type', 'text/plain');
+    return res.send(txt);
+  }
+  res.status(404).send('QR data URL not available');
 });
 
 // small express server for status
