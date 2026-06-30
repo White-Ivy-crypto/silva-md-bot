@@ -1,12 +1,5 @@
 node_modules/
-session/
-temp/
-.cache/
-.config/
-*.log
 .env
-.replit
-replit.nix
-data/lid-phone-cache.json
-data/push-names.json
-.local/
+data/
+tmp/
+.wwebjs_auth/
